@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Калькулятор Рассрочки PRO</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { -webkit-tap-highlight-color: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #0f172a; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #3b82f6; border-radius: 10px; }
+        
+        @keyframes slideIn {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .toast {
+            animation: slideIn 0.3s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-200">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect } = React;
+
+        const Icon = ({ name, className }) => <i data-lucide={name} className={className}></i>;
+
+        function App() {
+            const [amount, setAmount] = useState('');
+            const [downPayment, setDownPayment] = useState('');
+            const [extraCharge, setExtraCharge] = useState(''); 
+            const [months, setMonths] = useState(''); 
+            const [markupRate, setMarkupRate] = useState(''); 
+            const [startDate] = useState(new Date());
+            const [showToast, setShowToast] = useState(false);
+
+            useEffect(() => {
+                if (window.lucide) window.lucide.createIcons();
+            }, [amount, downPayment, extraCharge, months, markupRate, showToast]);
+
+            const calculations = useMemo(() => {
+                const base = parseFloat(amount) || 0;
+                const extra = parseFloat(extraCharge) || 0;
+                const dur = parseInt(months) || 0;
+                const rate = parseFloat(markupRate) || 0;
+                const isDownPaymentSet = downPayment !== '' && !isNaN(parseFloat(downPayment));
+                const initial = isDownPaymentSet ? parseFloat(downPayment) : 0;
+
+                if (base <= 0 || dur <= 0) return { monthly: 0, total: 0, schedule: [] };
+
+                const baseWithExtra = base + extra;
+                const totalWithMarkup = baseWithExtra + (baseWithExtra * (rate / 100));
+                
+                let schedule = [];
+                let monthlyRounded = 0;
+                let totalFinal = 0;
+
+                if (isDownPaymentSet) {
+                    const remainingToFinance = Math.max(0, totalWithMarkup - initial);
+                    const remainingMonths = Math.max(1, dur - 1);
+                    const monthlyExact = remainingToFinance / remainingMonths;
+                    monthlyRounded = Math.ceil(monthlyExact / 50) * 50;
+                    totalFinal = initial + (monthlyRounded * remainingMonths);
+
+                    schedule.push({
+                        id: 1,
+                        date: new Date(startDate).toLocaleDateString('ru-RU'),
+                        pay: initial,
+                        label: 'Первый взнос',
+                        remain: totalFinal - initial
+                    });
+
+                    for (let i = 1; i < dur; i++) {
+                        const d = new Date(startDate);
+                        d.setMonth(startDate.getMonth() + i);
+                        const paidSoFar = initial + (monthlyRounded * i);
+                        schedule.push({
+                            id: i + 1,
+                            date: d.toLocaleDateString('ru-RU'),
+                            pay: monthlyRounded,
+                            label: `Платеж ${i + 1}`,
+                            remain: Math.max(0, totalFinal - paidSoFar)
+                        });
+                    }
+                } else {
+                    const monthlyExact = totalWithMarkup / dur;
+                    monthlyRounded = Math.ceil(monthlyExact / 50) * 50;
+                    totalFinal = monthlyRounded * dur;
+
+                    for (let i = 0; i < dur; i++) {
+                        const d = new Date(startDate);
+                        d.setMonth(startDate.getMonth() + i);
+                        const paidSoFar = monthlyRounded * (i + 1);
+                        schedule.push({
+                            id: i + 1,
+                            date: d.toLocaleDateString('ru-RU'),
+                            pay: monthlyRounded,
+                            label: `Платеж ${i + 1}`,
+                            remain: Math.max(0, totalFinal - paidSoFar)
+                        });
+                    }
+                }
+
+                return { 
+                    monthly: monthlyRounded, 
+                    total: totalFinal, 
+                    schedule, 
+                    pureAmount: base,
+                    initialPay: initial,
+                    isDownPaymentSet
+                };
+            }, [amount, downPayment, extraCharge, months, markupRate, startDate]);
+
+            const handleShare = () => {
+                if (calculations.schedule.length === 0) return;
+
+                // Компактный и красивый формат для мессенджеров
+                let text = `📄 *РАСЧЕТ РАССРОЧКИ*\n`;
+                text += `────────────────────\n`;
+                text += `🏷 *Товар:* ${calculations.pureAmount.toLocaleString()} ₽\n`;
+                text += `🗓 *Срок:* ${months} мес.\n`;
+                
+                if (calculations.isDownPaymentSet) {
+                    text += `💰 *1-й взнос:* ${calculations.initialPay.toLocaleString()} ₽\n`;
+                    text += `💳 *Месячный:* ${calculations.monthly.toLocaleString()} ₽\n`;
+                } else {
+                    text += `💳 *Месячный:* ${calculations.monthly.toLocaleString()} ₽\n`;
+                }
+                
+                text += `────────────────────\n`;
+                text += `📅 *ГРАФИК:*\n`;
+                
+                calculations.schedule.forEach(item => {
+                    const icon = (calculations.isDownPaymentSet && item.id === 1) ? '⏺️' : '🔹';
+                    const label = (calculations.isDownPaymentSet && item.id === 1) ? 'взнос' : 'платеж';
+                    text += `${icon} ${item.date} — *${item.pay.toLocaleString()} ₽*\n`;
+                });
+
+                text += `────────────────────\n`;
+                text += `✅ *ИТОГО:* ${calculations.total.toLocaleString()} ₽`;
+
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                textArea.style.position = "fixed";
+                textArea.style.left = "-9999px";
+                textArea.style.top = "0";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                
+                try {
+                    document.execCommand('copy');
+                    setShowToast(true);
+                    setTimeout(() => setShowToast(false), 3000);
+                } catch (err) {
+                    console.error('Copy error', err);
+                }
+                document.body.removeChild(textArea);
+            };
+
+            return (
+                <div className="min-h-screen p-2 md:p-4 lg:p-6 max-w-[1440px] mx-auto relative">
+                    <header className="bg-slate-900/50 backdrop-blur-md rounded-2xl p-4 mb-4 shadow-xl border border-slate-800 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-blue-600 p-2 rounded-xl shadow-lg shadow-blue-900/50">
+                                <Icon name="credit-card" className="text-white w-5 h-5" />
+                            </div>
+                            <h1 className="font-bold text-white text-base md:text-lg tracking-tight">Калькулятор Рассрочки</h1>
+                        </div>
+                        
+                        <button 
+                            onClick={handleShare}
+                            disabled={calculations.schedule.length === 0}
+                            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-30 shadow-lg active:scale-95"
+                        >
+                            <Icon name="share-2" className="w-3.5 h-3.5" />
+                            <span>Клиенту</span>
+                        </button>
+                    </header>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+                        <div className="lg:col-span-4 xl:col-span-3 space-y-4">
+                            <div className="bg-slate-900/40 rounded-2xl p-5 border border-slate-800 shadow-lg">
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-[10px] font-black text-blue-400 uppercase mb-1 block tracking-widest">Цена товара</label>
+                                        <div className="relative">
+                                            <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0"
+                                                className="w-full bg-slate-950/50 border border-slate-800 text-white rounded-xl py-3 pl-10 pr-4 font-bold text-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all" />
+                                            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 font-bold">₽</div>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="text-[10px] font-black text-blue-400 uppercase mb-1 block tracking-widest">Доп. наценка</label>
+                                        <div className="relative">
+                                            <input type="number" value={extraCharge} onChange={e => setExtraCharge(e.target.value)} placeholder="0"
+                                                className="w-full bg-slate-950/50 border border-slate-800 text-blue-400 rounded-xl py-3 pl-10 pr-4 font-bold text-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all" />
+                                            <Icon name="plus" className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-[10px] font-black text-blue-400 uppercase mb-1 block tracking-widest">% Наценки</label>
+                                            <input type="number" value={markupRate} onChange={e => setMarkupRate(e.target.value)} placeholder="0"
+                                                className="w-full bg-slate-950/50 border border-slate-800 text-white rounded-xl py-3 px-3 font-bold text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-black text-blue-400 uppercase mb-1 block tracking-widest">Срок (мес)</label>
+                                            <input type="number" value={months} onChange={e => setMonths(e.target.value)} placeholder="0"
+                                                className="w-full bg-slate-950/50 border border-slate-800 text-white rounded-xl py-3 px-3 font-bold text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="text-[10px] font-black text-emerald-400 uppercase mb-1 block tracking-widest">Первый взнос</label>
+                                        <div className="relative">
+                                            <input type="number" value={downPayment} onChange={e => setDownPayment(e.target.value)} placeholder="0"
+                                                className="w-full bg-slate-950/50 border border-slate-800 text-emerald-400 rounded-xl py-3 pl-10 pr-4 font-bold text-lg focus:ring-2 focus:ring-emerald-500 outline-none transition-all" />
+                                            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 font-bold">₽</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-5 text-white shadow-xl relative overflow-hidden group">
+                                <div className="absolute -right-4 -top-4 opacity-20 group-hover:scale-125 transition-transform duration-700">
+                                    <Icon name="zap" className="w-24 h-24" />
+                                </div>
+                                <div className="relative z-10">
+                                    <p className="text-blue-100 text-[10px] font-black uppercase tracking-widest mb-1">
+                                        {calculations.isDownPaymentSet ? "Остальные платежи" : "Месячный платеж"}
+                                    </p>
+                                    <div className="flex items-baseline gap-2 mb-4">
+                                        <span className="text-4xl font-black tabular-nums">
+                                            {calculations.monthly.toLocaleString('ru-RU')}
+                                        </span>
+                                        <span className="text-blue-200 font-medium italic">₽</span>
+                                    </div>
+                                    <div className="pt-4 border-t border-white/10 flex justify-between items-end">
+                                        <span className="text-[10px] text-blue-100 font-bold uppercase">Итого к оплате:</span>
+                                        <span className="text-lg font-bold">{calculations.total.toLocaleString()} ₽</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="lg:col-span-8 xl:col-span-9">
+                            <div className="bg-slate-900/40 rounded-2xl border border-slate-800 shadow-lg flex flex-col h-full overflow-hidden">
+                                <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/20">
+                                    <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                        <Icon name="list" className="w-3.5 h-3.5 text-blue-500" />
+                                        График платежей
+                                    </h2>
+                                </div>
+                                
+                                <div className="overflow-x-auto custom-scrollbar overflow-y-auto max-h-[750px]">
+                                    <table className="w-full text-left border-collapse">
+                                        <thead className="sticky top-0 bg-slate-900 z-10">
+                                            <tr className="text-[10px] font-black text-slate-500 uppercase tracking-tighter">
+                                                <th className="w-12 px-4 py-4 text-center">№</th>
+                                                <th className="px-4 py-4">Дата</th>
+                                                <th className="px-4 py-4">Тип платежа</th>
+                                                <th className="px-4 py-4">Сумма</th>
+                                                <th className="px-4 py-4 text-right pr-6">Остаток</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-800/50">
+                                            {calculations.schedule.map((row) => (
+                                                <tr key={row.id} className={`hover:bg-slate-800/30 transition-colors group ${calculations.isDownPaymentSet && row.id === 1 ? 'bg-emerald-500/5' : ''}`}>
+                                                    <td className="px-4 py-4 text-[10px] font-bold text-center text-slate-600 group-hover:text-blue-400">{row.id}</td>
+                                                    <td className="px-4 py-4 text-[11px] font-bold text-slate-400 tabular-nums">{row.date}</td>
+                                                    <td className="px-4 py-4">
+                                                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${calculations.isDownPaymentSet && row.id === 1 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
+                                                            {calculations.isDownPaymentSet && row.id === 1 ? 'Первый взнос' : 'Платеж'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-4 text-[13px] font-black text-slate-200 tabular-nums">
+                                                        {row.pay.toLocaleString('ru-RU')} ₽
+                                                    </td>
+                                                    <td className="px-4 py-4 text-right pr-6 text-[11px] font-bold text-slate-500 tabular-nums">
+                                                        {row.remain.toLocaleString('ru-RU')} ₽
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                    {calculations.schedule.length === 0 && (
+                                        <div className="py-32 flex flex-col items-center justify-center grayscale opacity-10">
+                                            <Icon name="layout" className="w-12 h-12 mb-3 text-slate-400" />
+                                            <p className="text-[10px] font-black uppercase tracking-widest italic text-center px-4">Введите данные для расчета</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {showToast && (
+                        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+                            <div className="toast bg-blue-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-blue-400/30">
+                                <Icon name="check-circle" className="w-5 h-5" />
+                                <span className="text-sm font-bold">Расчет для клиента скопирован!</span>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
