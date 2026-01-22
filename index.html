@@ -38,6 +38,7 @@
             const [amount, setAmount] = useState('');
             const [downPayment, setDownPayment] = useState('');
             const [extraCharge, setExtraCharge] = useState(''); 
+            const [isAutoExtra, setIsAutoExtra] = useState(false);
             const [months, setMonths] = useState(''); 
             const [markupRate, setMarkupRate] = useState(''); 
             const [startDate] = useState(new Date());
@@ -45,11 +46,44 @@
 
             useEffect(() => {
                 if (window.lucide) window.lucide.createIcons();
-            }, [amount, downPayment, extraCharge, months, markupRate, showToast]);
+            }, [amount, downPayment, extraCharge, months, markupRate, isAutoExtra, showToast]);
+
+            // Функция сброса всех полей
+            const handleReset = () => {
+                setAmount('');
+                setDownPayment('');
+                setExtraCharge('');
+                setMonths('');
+                setMarkupRate('');
+                setIsAutoExtra(false);
+            };
+
+            // Логика автоматического подбора наценки
+            const autoExtraValue = useMemo(() => {
+                if (!isAutoExtra) return null;
+                const p = parseFloat(amount) || 0;
+                if (p < 1000) return 0;
+                if (p < 10000) return 1000;
+                if (p < 12500) return 1100;
+                if (p < 15000) return 1150;
+                if (p < 20000) return 1200;
+                if (p < 25000) return 1250;
+                if (p < 30000) return 1300;
+                if (p < 35000) return 1350;
+                if (p < 40000) return 1400;
+                if (p < 45000) return 1450;
+                if (p < 50000) return 1500;
+                if (p < 60000) return 1600;
+                if (p < 70000) return 1700;
+                if (p < 80000) return 1800;
+                if (p < 90000) return 2000;
+                if (p <= 100000) return 3000;
+                return 3000; 
+            }, [amount, isAutoExtra]);
 
             const calculations = useMemo(() => {
                 const base = parseFloat(amount) || 0;
-                const extra = parseFloat(extraCharge) || 0;
+                const fixedExtra = isAutoExtra ? (autoExtraValue || 0) : (parseFloat(extraCharge) || 0);
                 const dur = parseInt(months) || 0;
                 const rate = parseFloat(markupRate) || 0;
                 
@@ -58,7 +92,7 @@
 
                 if (base <= 0 || dur <= 0) return { monthly: 0, total: 0, schedule: [] };
 
-                const baseWithExtra = base + extra;
+                const baseWithExtra = base + fixedExtra;
                 const totalWithMarkup = baseWithExtra + (baseWithExtra * (rate / 100));
                 
                 let schedule = [];
@@ -90,37 +124,22 @@
                             remain: Math.max(0, totalFinal - paidSoFar)
                         });
                     }
-                } else if (initialInput === 0) {
-                    const monthlyExact = totalWithMarkup / dur;
-                    monthlyRounded = Math.ceil(monthlyExact / 50) * 50;
-                    totalFinal = monthlyRounded * dur;
-
-                    for (let i = 0; i < dur; i++) {
-                        const d = new Date(startDate);
-                        d.setMonth(startDate.getMonth() + i + 1);
-                        const paidSoFar = monthlyRounded * (i + 1);
-                        schedule.push({
-                            id: i + 1,
-                            date: formatDate(d),
-                            pay: monthlyRounded,
-                            label: `Пл. ${i + 1}`,
-                            remain: Math.max(0, totalFinal - paidSoFar)
-                        });
-                    }
                 } else {
                     const initial = initialInput;
                     const remainingToFinance = Math.max(0, totalWithMarkup - initial);
                     const remainingMonths = Math.max(1, dur - 1);
-                    const monthlyExact = remainingToFinance / remainingMonths;
+                    const monthlyExact = remainingMonths > 0 ? remainingToFinance / remainingMonths : 0;
+                    
                     monthlyRounded = Math.ceil(monthlyExact / 50) * 50;
-                    totalFinal = initial + (monthlyRounded * remainingMonths);
+                    totalFinal = initial + (monthlyRounded * (dur - 1 || 0));
+                    if (dur === 1) totalFinal = initial;
 
                     schedule.push({
                         id: 1,
                         date: formatDate(new Date(startDate)),
                         pay: initial,
                         label: 'Взнос',
-                        remain: totalFinal - initial
+                        remain: Math.max(0, totalFinal - initial)
                     });
 
                     for (let i = 1; i < dur; i++) {
@@ -142,25 +161,20 @@
                     total: totalFinal, 
                     schedule, 
                     pureAmount: base,
-                    extraCharge: extra,
-                    initialPay: isFieldEmpty ? monthlyRounded : initialInput,
-                    isFieldEmpty
+                    extraCharge: fixedExtra,
+                    initialPay: isFieldEmpty ? monthlyRounded : initialInput
                 };
-            }, [amount, downPayment, extraCharge, months, markupRate, startDate]);
+            }, [amount, downPayment, extraCharge, isAutoExtra, autoExtraValue, months, markupRate, startDate]);
 
             const handleShare = () => {
                 if (calculations.schedule.length === 0) return;
                 let text = `📄 *РАСЧЕТ РАССРОЧКИ*\n`;
                 text += `────────────────────\n`;
                 text += `🏷 *Товар:* ${calculations.pureAmount.toLocaleString()} ₽\n`;
+                text += `➕ *Наценка:* ${calculations.extraCharge.toLocaleString()} ₽\n`;
                 text += `🗓 *Срок:* ${months} мес.\n`;
                 text += `💰 *Первый взнос:* ${calculations.initialPay.toLocaleString()} ₽\n`;
-                text += `💳 *Месячный платеж:* ${calculations.monthly.toLocaleString()} ₽\n`;
-                text += `────────────────────\n`;
-                text += `📅 *ГРАФИК:*\n`;
-                calculations.schedule.forEach(item => {
-                    text += `🔹 ${item.date} — *${item.pay.toLocaleString()} ₽*\n`;
-                });
+                text += `💳 *Платеж:* ${calculations.monthly.toLocaleString()} ₽\n`;
                 text += `────────────────────\n`;
                 text += `✅ *ИТОГО:* ${calculations.total.toLocaleString()} ₽`;
 
@@ -188,11 +202,18 @@
                             </div>
                             <h1 className="font-bold text-white text-sm md:text-lg leading-tight">Рассрочка PRO</h1>
                         </div>
-                        <button onClick={handleShare} disabled={calculations.schedule.length === 0}
-                            className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-xl text-[10px] md:text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-30 whitespace-nowrap shadow-lg shadow-blue-900/20 active:scale-95">
-                            <Icon name="share-2" className="w-3 h-3 md:w-3.5 md:h-3.5" />
-                            <span>Копировать</span>
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button onClick={handleReset}
+                                className="bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-2 rounded-xl text-[10px] md:text-xs font-bold transition-all flex items-center gap-2 shadow-lg active:scale-95 border border-slate-600/50">
+                                <Icon name="refresh-cw" className="w-3 h-3 md:w-3.5 md:h-3.5" />
+                                <span className="hidden sm:inline">Сброс</span>
+                            </button>
+                            <button onClick={handleShare} disabled={calculations.schedule.length === 0}
+                                className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-xl text-[10px] md:text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-30 shadow-lg shadow-blue-900/20 active:scale-95">
+                                <Icon name="share-2" className="w-3 h-3 md:w-3.5 md:h-3.5" />
+                                <span>Копировать</span>
+                            </button>
+                        </div>
                     </header>
 
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -200,7 +221,7 @@
                             <div className="bg-slate-800/40 rounded-2xl p-4 border border-slate-700/50 shadow-md">
                                 <div className="space-y-4">
                                     <div>
-                                        <label className="text-[9px] font-black text-blue-400 uppercase mb-1 block tracking-widest text-center">Цена товара</label>
+                                        <label className="text-[9px] font-black text-blue-400 uppercase mb-1.5 block tracking-widest text-center italic">Цена товара</label>
                                         <div className="relative">
                                             <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0"
                                                 className="w-full bg-slate-900 border border-slate-700/50 text-white rounded-xl py-2.5 pl-9 pr-4 font-bold text-base focus:ring-2 focus:ring-blue-500 outline-none transition-all text-center" />
@@ -209,39 +230,57 @@
                                     </div>
 
                                     <div>
-                                        <label className="text-[9px] font-black text-blue-400 uppercase mb-1 block tracking-widest text-center">Доп. наценка</label>
+                                        <div className="flex justify-between items-center mb-1.5 px-1">
+                                            <label className="text-[9px] font-black text-indigo-400 uppercase tracking-widest italic">Доп. наценка</label>
+                                            <div className="flex items-center gap-1.5 cursor-pointer" onClick={() => setIsAutoExtra(!isAutoExtra)}>
+                                                <span className={`text-[8px] font-bold uppercase ${isAutoExtra ? 'text-blue-400' : 'text-slate-500'}`}>Авто</span>
+                                                <div className={`w-7 h-4 rounded-full p-0.5 transition-colors ${isAutoExtra ? 'bg-blue-600' : 'bg-slate-700'}`}>
+                                                    <div className={`w-3 h-3 bg-white rounded-full transition-transform ${isAutoExtra ? 'translate-x-3' : 'translate-x-0'}`}></div>
+                                                </div>
+                                            </div>
+                                        </div>
                                         <div className="relative">
-                                            <input type="number" value={extraCharge} onChange={e => setExtraCharge(e.target.value)} placeholder="0"
-                                                className="w-full bg-slate-900 border border-slate-700/50 text-indigo-400 rounded-xl py-2.5 pl-9 pr-4 font-bold text-base focus:ring-2 focus:ring-blue-500 outline-none transition-all text-center" />
+                                            <input 
+                                                type="number" 
+                                                value={isAutoExtra ? (autoExtraValue || '') : extraCharge} 
+                                                onChange={e => setExtraCharge(e.target.value)} 
+                                                disabled={isAutoExtra}
+                                                placeholder={isAutoExtra ? "Авто" : "0"}
+                                                className={`w-full border border-slate-700/50 rounded-xl py-2.5 pl-9 pr-4 font-bold text-base focus:ring-2 focus:ring-blue-500 outline-none transition-all text-center ${isAutoExtra ? 'bg-slate-800/50 text-blue-400 cursor-not-allowed' : 'bg-slate-900 text-indigo-400'}`} 
+                                            />
                                             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-sm">₽</div>
+                                            {isAutoExtra && <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-blue-500 animate-pulse"><Icon name="zap" className="w-3 h-3" /></div>}
                                         </div>
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-3">
                                         <div>
-                                            <label className="text-[9px] font-black text-blue-400 uppercase mb-1 block tracking-widest text-center">% Наценки</label>
+                                            <label className="text-[9px] font-black text-blue-400 uppercase mb-1.5 block tracking-widest text-center italic">% Наценки</label>
                                             <input type="number" value={markupRate} onChange={e => setMarkupRate(e.target.value)} placeholder="0"
                                                 className="w-full bg-slate-900 border border-slate-700/50 text-white rounded-xl py-2.5 px-3 font-bold text-sm outline-none focus:ring-2 focus:ring-blue-500 text-center" />
                                         </div>
                                         <div>
-                                            <label className="text-[9px] font-black text-blue-400 uppercase mb-1 block tracking-widest text-center">Срок (мес)</label>
+                                            <label className="text-[9px] font-black text-blue-400 uppercase mb-1.5 block tracking-widest text-center italic">Срок (мес)</label>
                                             <input type="number" value={months} onChange={e => setMonths(e.target.value)} placeholder="0"
                                                 className="w-full bg-slate-900 border border-slate-700/50 text-white rounded-xl py-2.5 px-3 font-bold text-sm outline-none focus:ring-2 focus:ring-blue-500 text-center" />
                                         </div>
                                     </div>
 
                                     <div>
-                                        <label className="text-[9px] font-black text-emerald-400 uppercase mb-1 block tracking-widest text-center">Первый взнос</label>
+                                        <label className="text-[9px] font-black text-emerald-400 uppercase mb-1.5 block tracking-widest text-center italic">Первый взнос</label>
                                         <input type="number" value={downPayment} onChange={e => setDownPayment(e.target.value)} placeholder="Пусто = Авто"
                                             className="w-full bg-slate-900 border border-slate-700/50 text-emerald-400 rounded-xl py-2.5 px-4 font-bold text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all placeholder:text-slate-600 text-center" />
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-5 text-white shadow-xl relative text-center">
-                                <p className="text-blue-100 text-[9px] font-black uppercase mb-1 tracking-widest">Ежемесячно</p>
-                                <div className="text-3xl font-black tabular-nums tracking-tight">{calculations.monthly.toLocaleString()} ₽</div>
-                                <div className="mt-3 pt-3 border-t border-white/10 flex justify-between items-end">
+                            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-5 text-white shadow-xl relative text-center overflow-hidden">
+                                <div className="absolute -right-4 -top-4 opacity-10 rotate-12">
+                                    <Icon name="calculator" className="w-20 h-20" />
+                                </div>
+                                <p className="text-blue-100 text-[9px] font-black uppercase mb-1 tracking-[0.2em] relative z-10">Ежемесячно</p>
+                                <div className="text-3xl font-black tabular-nums tracking-tight relative z-10">{calculations.monthly.toLocaleString()} ₽</div>
+                                <div className="mt-3 pt-3 border-t border-white/10 flex justify-between items-end relative z-10">
                                     <span className="text-[9px] text-blue-100 font-bold uppercase tracking-widest">Итого:</span>
                                     <span className="text-base font-bold">{calculations.total.toLocaleString()} ₽</span>
                                 </div>
@@ -251,7 +290,7 @@
                         <div className="lg:col-span-8 xl:col-span-9 flex flex-col h-full">
                             <div className="bg-slate-800/40 rounded-2xl border border-slate-700/50 overflow-hidden flex flex-col h-full shadow-md">
                                 <div className="px-4 py-3 border-b border-slate-700/50 bg-slate-800/30 flex items-center justify-between">
-                                    <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                    <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 italic">
                                         <Icon name="list" className="w-3 h-3 text-blue-500" />
                                         График платежей
                                     </h2>
@@ -269,13 +308,13 @@
                                         <tbody className="divide-y divide-slate-700/30">
                                             {calculations.schedule.map((row) => (
                                                 <tr key={row.id} className="hover:bg-slate-700/20 transition-colors group">
-                                                    <td className="py-3 text-[9px] font-bold text-center text-slate-500">{row.id}</td>
-                                                    <td className="px-2 py-3 text-[10px] font-bold text-slate-300 tabular-nums leading-tight text-center">
+                                                    <td className="py-3 text-[9px] font-bold text-center text-slate-500 italic">{row.id}</td>
+                                                    <td className="px-2 py-3 text-[10px] font-bold text-slate-300 tabular-nums leading-tight text-center whitespace-nowrap">
                                                         {row.date}
                                                     </td>
                                                     <td className="px-2 py-3 text-center">
                                                         <div className="text-[12px] font-black text-slate-100">{row.pay.toLocaleString()} ₽</div>
-                                                        <div className="text-[8px] text-slate-400 font-black uppercase tracking-tighter truncate">{row.label}</div>
+                                                        <div className="text-[8px] text-slate-400 font-black uppercase tracking-tighter truncate italic">{row.label}</div>
                                                     </td>
                                                     <td className="px-2 py-3 text-center text-[10px] font-bold text-slate-400/80 tabular-nums">
                                                         {row.remain.toLocaleString()} ₽
@@ -285,9 +324,9 @@
                                         </tbody>
                                     </table>
                                     {calculations.schedule.length === 0 && (
-                                        <div className="py-20 text-center opacity-20 flex flex-col items-center gap-2">
-                                            <Icon name="layout" className="w-12 h-12" />
-                                            <p className="text-[9px] font-black uppercase tracking-[0.2em]">Введите данные для расчета</p>
+                                        <div className="py-20 text-center opacity-20 flex flex-col items-center gap-2 font-black uppercase tracking-[0.2em] text-[9px] italic">
+                                            <Icon name="info" className="w-6 h-6" />
+                                            Ожидание данных
                                         </div>
                                     )}
                                 </div>
